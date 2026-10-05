@@ -44,16 +44,36 @@ jobs:
           script: |
             const version = '${{ steps.version.outputs.version }}';
             const tag = `go/v${version}`;
+            const goSection = `## Go module v${version}\n\nInstall with:\n\n\`\`\`\ngo get github.com/Quiet-Terminal-Interactive/QTINeon/go@v${version}\n\`\`\``;
+            let release;
+            try {
+              release = await github.rest.repos.getReleaseByTag({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                tag,
+              });
+            } catch (error) {
+              if (error.status !== 404) throw error;
+              release = await github.rest.repos.createRelease({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                tag_name: tag,
+                name: `QTI Neon v${version}`,
+                body: goSection,
+                draft: false,
+                prerelease: false,
+              });
+            }
 
-            const release = await github.rest.repos.createRelease({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              tag_name: tag,
-              name: `QTI Neon (Go) v${version}`,
-              body: `Go module release v${version}.\n\nInstall with:\n\n\`\`\`\ngo get github.com/Quiet-Terminal-Interactive/QTINeon/go@v${version}\n\`\`\``,
-              draft: false,
-              prerelease: false,
-            });
+            if (!release.data.body?.includes(`## Go module v${version}`)) {
+              const body = [release.data.body?.trim(), goSection].filter(Boolean).join('\n\n');
+              release = await github.rest.repos.updateRelease({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                release_id: release.data.id,
+                body,
+              });
+            }
 
             core.setOutput('release_url', release.data.html_url);
 
