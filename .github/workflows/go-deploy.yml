@@ -1,0 +1,76 @@
+name: Deploy to Go
+
+on:
+  issues:
+    types: [opened, labeled]
+
+jobs:
+  deploy:
+    name: Release Go module
+    runs-on: ubuntu-latest
+    if: >
+      github.event.issue.title == 'Deploy to Go' &&
+      contains(github.event.issue.labels.*.name, 'CI')
+    permissions:
+      contents: write
+      issues: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Read version from go/VERSION
+        id: version
+        run: |
+          VERSION=$(cat go/VERSION | tr -d '[:space:]')
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Build and vet
+        working-directory: go
+        run: |
+          go build ./...
+          go vet ./...
+
+      - name: Create GitHub Release
+        id: release
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const version = '${{ steps.version.outputs.version }}';
+            const tag = `go/v${version}`;
+
+            const release = await github.rest.repos.createRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag_name: tag,
+              name: `QTI Neon (Go) v${version}`,
+              body: `Go module release v${version}.\n\nInstall with:\n\n\`\`\`\ngo get github.com/Quiet-Terminal-Interactive/QTINeon/go@v${version}\n\`\`\``,
+              draft: false,
+              prerelease: false,
+            });
+
+            core.setOutput('release_url', release.data.html_url);
+
+      - name: Comment on issue with result
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const success = '${{ job.status }}' === 'success';
+            const version = '${{ steps.version.outputs.version }}';
+            const releaseUrl = '${{ steps.release.outputs.release_url }}';
+            const body = success
+              ? `Release created for the Go module v${version}. It will become available via the [Go module proxy](https://proxy.golang.org) shortly. See [the release](${releaseUrl}).`
+              : `Deployment failed. Check the [workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) for details.`;
+            github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body
+            });

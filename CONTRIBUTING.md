@@ -66,6 +66,17 @@ Any new packet type must be added to all implementations to maintain interoperab
 
 </details>
 
+<details>
+<summary>Go</summary>
+
+1. Add a constant to `PacketType` in `protocol.go` with its byte value
+2. Add a struct with a `MarshalBinary() ([]byte, error)` method and a matching `UnmarshalXxx(data []byte) (Xxx, error)` function
+3. Add a case to the type switch in `NeonPacket.ToBytes()` / `NeonPacketFromBytes()`
+4. Handle it in `NeonRelay`'s packet dispatch in `relay.go`, `NeonHost` in `host.go`, or `NeonClient` in `client.go` as appropriate
+5. Add tests
+
+</details>
+
 ## Adding a New Language Implementation
 
 New language implementations are always welcome. To be accepted, the implementation must be integrated into `test_compliance.py` and all compliance tests must pass.
@@ -84,6 +95,15 @@ Concretely, for a new implementation called `<lang>`:
 The Java implementation is the wire-format reference. If the new implementation disagrees with Java on packet framing or session handshake, fix the new implementation — not Java.
 
 ## Requirements
+
+<details>
+<summary>Go</summary>
+
+- Go 1.22+
+
+No additional dependencies are required for DTLS — `github.com/pion/dtls/v2` is a direct, pure-Go module dependency.
+
+</details>
 
 <details>
 <summary>Godot</summary>
@@ -124,6 +144,24 @@ Optional for DTLS:
 </details>
 
 ## Build
+
+<details>
+<summary>Go</summary>
+
+```bash
+cd go
+go build ./...
+go vet ./...
+```
+
+Generate docs:
+
+```bash
+gomarkdoc ./... --output ../docs/go/README.md
+# output: ../docs/go/README.md
+```
+
+</details>
 
 <details>
 <summary>Godot</summary>
@@ -192,6 +230,43 @@ npm install koffi
 </details>
 
 ## Tests
+
+<details>
+<summary>Go</summary>
+
+Tests open real UDP sockets on loopback:
+
+```bash
+cd go
+go test ./...
+```
+
+Run a specific test file's tests:
+
+```bash
+go test ./... -run TestHost
+```
+
+Run only the integration tests:
+
+```bash
+go test ./... -run TestIntegration
+```
+
+Tests are split by concern:
+
+| File                       | What it tests                                              |
+| -------------------------- | ----------------------------------------------------------- |
+| `protocol_test.go`         | Packet parsing, serialisation, config                       |
+| `config_test.go`           | NeonConfig validation                                        |
+| `relay_test.go`            | NeonRelay with raw socket counterparts                       |
+| `host_test.go`             | NeonHost with a mock relay                                   |
+| `client_test.go`           | NeonClient with a mock relay                                  |
+| `reliable_test.go`         | ReliablePacketManager in isolation                            |
+| `integration_test.go`      | Full stack: relay + host + client over loopback               |
+| `dtls_integration_test.go` | Full encrypted stack over loopback with a self-signed cert    |
+
+</details>
 
 <details>
 <summary>Godot</summary>
@@ -312,6 +387,19 @@ Tests are split by concern:
 </details>
 
 ## Code Style
+
+<details>
+<summary>Go</summary>
+
+- Go 1.22+ — `gofmt` and `go vet` must be clean
+- No `fmt.Println`/`fmt.Printf` in the library (use `log/slog`)
+- No comments that describe *what* the code does — only *why*, when non-obvious
+- No speculative abstractions — solve the problem in front of you
+- Unexported (lowercase) identifiers for internals; exported (uppercase) only for the API surface
+- One `*slog.Logger` per component (e.g. `relayLogger`, `hostLogger`, `clientLogger`)
+- 64-bit wire fields (`token`, `hostToken`, `timestamp`) use native `int64`/`uint64`; no special handling needed
+
+</details>
 
 <details>
 <summary>Godot</summary>

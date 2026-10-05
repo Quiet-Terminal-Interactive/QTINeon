@@ -13,11 +13,17 @@ Steps
 2. Compile small Java host/client runner programs against the installed JAR
 3. Create a Python venv and install the Python library
 4. Build the TypeScript library  (npm install && npm run build)
-5. Test A  — Java host + Python client: client sends a packet, host logs receipt
-6. Test B  — Python host + Java client: client sends a packet, host logs receipt
-7. Test C  — Java host + TypeScript client: client sends a packet, host logs receipt
-8. Test D  — TypeScript host + Java client: client sends a packet, host logs receipt
-9. Cleanup — remove the Maven artifact and delete the venv + work directory
+5. Build the Go library  (go mod tidy && go build), via a throwaway module with
+   a replace directive pointing at the local go/ package
+6. Test A  — Java host + Python client: client sends a packet, host logs receipt
+7. Test B  — Python host + Java client: client sends a packet, host logs receipt
+8. Test C  — Java host + TypeScript client: client sends a packet, host logs receipt
+9. Test D  — TypeScript host + Java client: client sends a packet, host logs receipt
+10. Test E — Java host + Godot client: client sends a packet, host logs receipt
+11. Test F — Godot host + Java client: client sends a packet, host logs receipt
+12. Test G — Java host + Go client: client sends a packet, host logs receipt
+13. Test H — Go host + Java client: client sends a packet, host logs receipt
+14. Cleanup — remove the Maven artifact and delete the venv + work directory
 """
 
 import os
@@ -31,13 +37,15 @@ import venv as _venv
 
 # Constants
 
-RELAY     = "neon-relay.quietterminal.co.uk:7777"
+RELAY     = os.environ.get("NEON_COMPLIANCE_RELAY", "neon-relay.quietterminal.co.uk:7777")
 SESSION_A = 9901   # Java host / Python client
 SESSION_B = 9902   # Python host / Java client
 SESSION_C = 9903   # Java host / TypeScript client
 SESSION_D = 9904   # TypeScript host / Java client
 SESSION_E = 9905   # Java host / Godot client
 SESSION_F = 9906   # Godot host / Java client
+SESSION_G = 9907   # Java host / Go client
+SESSION_H = 9908   # Go host / Java client
 
 BASE_DIR    = os.path.dirname(os.path.abspath(__file__))
 JAVA_DIR    = os.path.join(BASE_DIR, "java")
@@ -45,6 +53,7 @@ PYTHON_DIR  = os.path.join(BASE_DIR, "python")
 JS_TS_DIR   = os.path.join(BASE_DIR, "js-ts")
 JS_TS_DIST  = os.path.join(JS_TS_DIR, "dist")
 GODOT_DIR   = os.path.join(BASE_DIR, "godot")
+GO_DIR      = os.path.join(BASE_DIR, "go")
 WORK_DIR    = os.path.join(BASE_DIR, ".compliance_work")
 VENV_DIR    = os.path.join(BASE_DIR, ".compliance_venv")
 VENV_PYTHON = os.path.join(VENV_DIR, "bin", "python")
@@ -75,7 +84,7 @@ _JAVA_HOST = textwrap.dedent("""\
                 System.out.println("CLIENT_CONNECTED:" + (id & 0xFF) + ":" + name);
                 System.out.flush();
             });
-            host.setUnhandledPacketCallback((type, sender) -> {
+            host.setUnhandledPacketCallback((type, sender, payload) -> {
                 System.out.println("PACKET_RECEIVED:" + (type & 0xFF) + ":" + (sender & 0xFF));
                 System.out.flush();
             });
@@ -118,7 +127,7 @@ _JAVA_CLIENT = textwrap.dedent("""\
             NeonConfig cfg    = NeonConfig.defaults();
             NeonClient client = new NeonClient("java-client", cfg);
 
-            client.setUnhandledPacketCallback((type, sender) -> {
+            client.setUnhandledPacketCallback((type, sender, payload) -> {
                 System.out.println("PACKET_RECEIVED:" + (type & 0xFF) + ":" + (sender & 0xFF));
                 System.out.flush();
             });
@@ -162,7 +171,7 @@ _PY_HOST = textwrap.dedent("""\
         lambda cid, name, sid: print(f"CLIENT_CONNECTED:{cid}:{name}", flush=True)
     )
     host.set_unhandled_packet_callback(
-        lambda ptype, sender: print(f"PACKET_RECEIVED:{ptype}:{sender}", flush=True)
+        lambda ptype, sender, payload: print(f"PACKET_RECEIVED:{ptype}:{sender}", flush=True)
     )
 
     threading.Thread(target=host.start_and_run, daemon=True).start()
@@ -195,7 +204,7 @@ _PY_CLIENT = textwrap.dedent("""\
 
     client = NeonClient("python-client")
     client.set_unhandled_packet_callback(
-        lambda ptype, sender: print(f"PACKET_RECEIVED:{ptype}:{sender}", flush=True)
+        lambda ptype, sender, payload: print(f"PACKET_RECEIVED:{ptype}:{sender}", flush=True)
     )
 
     ok = client.connect(session_id=session_id, relay_address=relay)
@@ -284,6 +293,120 @@ _TS_CLIENT = textwrap.dedent("""\
 """)
 
 
+# Go source templates
+
+_GO_HOST = textwrap.dedent("""\
+    package main
+
+    import (
+        "bufio"
+        "fmt"
+        "os"
+        "strconv"
+        "time"
+
+        qtineon "github.com/Quiet-Terminal-Interactive/QTINeon/go"
+    )
+
+    func main() {
+        sessionID, _ := strconv.Atoi(os.Args[1])
+        relay := os.Args[2]
+
+        cfg := qtineon.DefaultConfig()
+        host, err := qtineon.NewHost(int32(sessionID), relay, cfg)
+        if err != nil {
+            fmt.Println("HOST_FAILED")
+            os.Exit(1)
+        }
+
+        host.SetClientConnectCallback(func(id uint8, name string, sid int32) {
+            fmt.Printf("CLIENT_CONNECTED:%d:%s\\n", id, name)
+        })
+        host.SetUnhandledPacketCallback(func(ptype, sender uint8, payload []byte) {
+            fmt.Printf("PACKET_RECEIVED:%d:%d\\n", ptype, sender)
+        })
+
+        go func() { _ = host.StartAndRun() }()
+
+        deadline := time.Now().Add(10 * time.Second)
+        for !host.IsRunning() && time.Now().Before(deadline) {
+            time.Sleep(50 * time.Millisecond)
+        }
+        if !host.IsRunning() {
+            fmt.Println("HOST_FAILED")
+            os.Exit(1)
+        }
+
+        fmt.Println("HOST_READY")
+
+        bufio.NewReader(os.Stdin).ReadByte()
+
+        if host.IsRunning() {
+            _ = host.Stop()
+        }
+    }
+""")
+
+_GO_CLIENT = textwrap.dedent("""\
+    package main
+
+    import (
+        "fmt"
+        "os"
+        "strconv"
+        "time"
+
+        qtineon "github.com/Quiet-Terminal-Interactive/QTINeon/go"
+    )
+
+    func main() {
+        sessionID, _ := strconv.Atoi(os.Args[1])
+        relay := os.Args[2]
+
+        cfg := qtineon.DefaultConfig()
+        client, err := qtineon.NewClient("go-client", cfg)
+        if err != nil {
+            fmt.Println("CONNECT_FAILED")
+            os.Exit(1)
+        }
+
+        client.SetUnhandledPacketCallback(func(ptype, sender uint8, payload []byte) {
+            fmt.Printf("PACKET_RECEIVED:%d:%d\\n", ptype, sender)
+        })
+
+        ok := client.Connect(int32(sessionID), relay)
+        if !ok {
+            fmt.Println("CONNECT_FAILED")
+            os.Exit(1)
+        }
+
+        cid, _ := client.ClientID()
+        fmt.Printf("CONNECTED:%d\\n", cid)
+
+        go client.Run()
+
+        time.Sleep(300 * time.Millisecond)
+        _ = client.SendPacket([]byte{0x42}, 0x10, 1)
+        fmt.Println("PACKET_SENT")
+
+        time.Sleep(1500 * time.Millisecond)
+        if client.IsRunning() {
+            _ = client.Stop()
+        }
+    }
+""")
+
+_GO_MOD = textwrap.dedent("""\
+    module compliance
+
+    go 1.22
+
+    require github.com/Quiet-Terminal-Interactive/QTINeon/go v0.0.0-00010101000000-000000000000
+
+    replace github.com/Quiet-Terminal-Interactive/QTINeon/go => {go_dir}
+""")
+
+
 # Helpers
 
 def _section(title: str) -> None:
@@ -339,6 +462,10 @@ def _java_cmd(main_class: str, *args) -> list:
 
 def _godot_cmd(script: str, *args) -> list:
     return ["godot", "--headless", "--path", GODOT_DIR, "--script", script, "--", *args]
+
+
+def _go_cmd(binary: str, *args) -> list:
+    return [os.path.join(WORK_DIR, "gomod", binary), *args]
 
 
 # Tests
@@ -589,6 +716,88 @@ def _test_godot_host_java_client() -> None:
         raise RuntimeError("Godot host did not receive the game packet from Java client")
 
 
+def _test_java_host_go_client() -> None:
+    _section(f"Test G: Java host  ←→  Go client   (session {SESSION_G})")
+
+    print("  Starting Java host…")
+    host_proc, host_lines = _launch(
+        _java_cmd("NeonHostRunner", str(SESSION_G), RELAY),
+        ready_marker="HOST_READY",
+        timeout=20,
+    )
+
+    print("  Starting Go client…")
+    client_proc, client_lines = _launch(
+        _go_cmd("go_client", str(SESSION_G), RELAY),
+        ready_marker="PACKET_SENT",
+        timeout=20,
+        use_stdin_pipe=False,
+    )
+
+    time.sleep(2.0)
+    client_proc.wait(timeout=5)
+
+    ok_conn   = any("CLIENT_CONNECTED" in l for l in host_lines)
+    ok_packet = any("PACKET_RECEIVED"  in l for l in host_lines)
+
+    try:
+        host_proc.stdin.close()
+        host_proc.wait(timeout=8)
+    except Exception:
+        host_proc.kill()
+
+    if ok_conn:
+        print(f"  {_PASS}  Java host registered Go client connection")
+    else:
+        print(f"  {_FAIL}  Java host never saw CLIENT_CONNECTED")
+
+    if ok_packet:
+        print(f"  {_PASS}  Java host received game packet from Go client")
+    else:
+        raise RuntimeError("Java host did not receive the game packet from Go client")
+
+
+def _test_go_host_java_client() -> None:
+    _section(f"Test H: Go host  ←→  Java client   (session {SESSION_H})")
+
+    print("  Starting Go host…")
+    host_proc, host_lines = _launch(
+        _go_cmd("go_host", str(SESSION_H), RELAY),
+        ready_marker="HOST_READY",
+        timeout=20,
+    )
+
+    print("  Starting Java client…")
+    client_proc, client_lines = _launch(
+        _java_cmd("NeonClientRunner", str(SESSION_H), RELAY),
+        ready_marker="PACKET_SENT",
+        timeout=20,
+        use_stdin_pipe=False,
+    )
+
+    time.sleep(2.0)
+    client_proc.wait(timeout=5)
+
+    ok_conn   = any("CLIENT_CONNECTED" in l for l in host_lines)
+    ok_packet = any("PACKET_RECEIVED"  in l for l in host_lines)
+
+    try:
+        host_proc.stdin.close()
+        host_proc.wait(timeout=8)
+    except Exception:
+        host_proc.kill()
+
+    if ok_conn:
+        print(f"  {_PASS}  Go host registered Java client connection")
+    else:
+        print(f"  {_FAIL}  Go host never saw CLIENT_CONNECTED")
+
+    if ok_packet:
+        print(f"  {_PASS}  Go host received game packet from Java client")
+    else:
+        raise RuntimeError("Go host did not receive the game packet from Java client")
+
+
 # Main
 
 def main() -> int:
@@ -623,6 +832,21 @@ def main() -> int:
         f.write(_TS_HOST.format(dist=dist_index))
     with open(os.path.join(WORK_DIR, "ts_client.js"), "w") as f:
         f.write(_TS_CLIENT.format(dist=dist_index))
+
+    _section("Step 5: Build Go library")
+    gomod_dir = os.path.join(WORK_DIR, "gomod")
+    os.makedirs(gomod_dir, exist_ok=True)
+
+    with open(os.path.join(gomod_dir, "go.mod"), "w") as f:
+        f.write(_GO_MOD.format(go_dir=GO_DIR))
+    with open(os.path.join(gomod_dir, "go_host.go"), "w") as f:
+        f.write(_GO_HOST)
+    with open(os.path.join(gomod_dir, "go_client.go"), "w") as f:
+        f.write(_GO_CLIENT)
+
+    _run(["go", "mod", "tidy"], cwd=gomod_dir)
+    _run(["go", "build", "-o", "go_host", "go_host.go"], cwd=gomod_dir)
+    _run(["go", "build", "-o", "go_client", "go_client.go"], cwd=gomod_dir)
 
     try:
         _test_java_host_python_client()
@@ -660,7 +884,19 @@ def main() -> int:
         print(f"\n  {_FAIL}  Test F failed: {e}")
         failures.append(f"Test F: {e}")
 
-    _section("Step 5: Cleanup")
+    try:
+        _test_java_host_go_client()
+    except Exception as e:
+        print(f"\n  {_FAIL}  Test G failed: {e}")
+        failures.append(f"Test G: {e}")
+
+    try:
+        _test_go_host_java_client()
+    except Exception as e:
+        print(f"\n  {_FAIL}  Test H failed: {e}")
+        failures.append(f"Test H: {e}")
+
+    _section("Step 6: Cleanup")
 
     if os.path.exists(M2_ARTIFACT):
         shutil.rmtree(M2_ARTIFACT)

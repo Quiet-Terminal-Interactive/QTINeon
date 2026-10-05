@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 name = "qti-neon"
 version = "1.0.1"
 description = "Minimal, game-agnostic, relay-based UDP multiplayer protocol library"
-readme = "../README.md"
+readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [{ name = "Kohan Mathers" }]
