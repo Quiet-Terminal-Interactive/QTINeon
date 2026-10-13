@@ -6,7 +6,7 @@ config_version=5
 [application]
 
 config/name="QTI Neon"
-config/version="1.0.0"
+config/version="1.1.0"
 config/features=PackedStringArray("4.2")
 config/run/main_scene=""
 

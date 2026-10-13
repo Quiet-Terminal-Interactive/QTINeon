@@ -185,6 +185,9 @@ class NeonRelay:
 
             limiter = self._rate_limiters.get(source)
             if limiter is None:
+                if len(self._rate_limiters) >= self._config.max_rate_limiters:
+                    logger.debug("Rate limiter capacity reached; packet discarded from %s", source)
+                    continue
                 limiter = _RateLimiter(self._config.max_packets_per_second)
                 self._rate_limiters[source] = limiter
             if not limiter.allow_packet():
@@ -330,22 +333,27 @@ class NeonRelay:
             self._send_deny(source, "Session not found")
             return
         key = f"{req.session_id}:{req.previous_client_id}"
+        new_reconnect = key not in self._pending_reconnects
+        if new_reconnect and len(self._pending_reconnects) >= self._config.max_pending_connections:
+            self._send_deny(source, "Relay busy")
+            return
         self._pending_reconnects[key] = _PendingReconnect(
             session_id=req.session_id,
             client_id=req.previous_client_id,
             new_address=source,
             requested_at=time.monotonic(),
         )
-        self._socket.send_packet(
-            NeonPacket.create(
-                PacketType.RECONNECT_REQUEST,
-                0,
-                req.previous_client_id,
-                1,
-                req,
-            ),
-            host,
-        )
+        if new_reconnect:
+            self._socket.send_packet(
+                NeonPacket.create(
+                    PacketType.RECONNECT_REQUEST,
+                    0,
+                    req.previous_client_id,
+                    1,
+                    req,
+                ),
+                host,
+            )
 
     def _handle_disconnect_notice(
         self, source: tuple[str, int], header: PacketHeader
@@ -433,8 +441,13 @@ class NeonRelay:
         for k in stale_rc:
             del self._pending_reconnects[k]
 
-        if len(self._rate_limiters) > self._config.max_rate_limiters:
-            self._rate_limiters.clear()
+        limiter_expiry_s = self._config.relay_client_timeout_ms / 1000.0
+        stale_limiters = [
+            k for k, v in self._rate_limiters.items()
+            if now - v.last_access > limiter_expiry_s
+        ]
+        for k in stale_limiters:
+            del self._rate_limiters[k]
 
 
 # Local imports to avoid forward-reference issues in match statements

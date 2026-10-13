@@ -18,13 +18,16 @@ type rateLimiter struct {
 	maxTokens  int
 	lastRefill time.Time
 	violations int
+	lastAccess time.Time
 }
 
 func newRateLimiter(maxTokensPerSecond int) *rateLimiter {
+	now := time.Now()
 	return &rateLimiter{
 		tokens:     maxTokensPerSecond,
 		maxTokens:  maxTokensPerSecond,
-		lastRefill: time.Now(),
+		lastRefill: now,
+		lastAccess: now,
 	}
 }
 
@@ -32,7 +35,9 @@ func newRateLimiter(maxTokensPerSecond int) *rateLimiter {
 func (r *rateLimiter) allowPacket() bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.refill()
+	now := time.Now()
+	r.lastAccess = now
+	r.refill(now)
 	if r.tokens > 0 {
 		r.tokens--
 		return true
@@ -48,8 +53,7 @@ func (r *rateLimiter) isThrottled() bool {
 	return r.violations > violationThreshold
 }
 
-func (r *rateLimiter) refill() {
-	now := time.Now()
+func (r *rateLimiter) refill(now time.Time) {
 	if now.Sub(r.lastRefill) >= time.Second {
 		r.tokens = r.maxTokens
 		r.lastRefill = now
@@ -57,4 +61,10 @@ func (r *rateLimiter) refill() {
 			r.violations--
 		}
 	}
+}
+
+func (r *rateLimiter) lastAccessTime() time.Time {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.lastAccess
 }

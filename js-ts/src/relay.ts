@@ -98,6 +98,9 @@ export class NeonRelay {
     const key = addressKey(source);
     let limiter = this.rateLimiters.get(key);
     if (!limiter) {
+      if (this.rateLimiters.size >= this.config.maxRateLimiters) {
+        return;
+      }
       limiter = new RateLimiter(this.config.maxPacketsPerSecond);
       this.rateLimiters.set(key, limiter);
     }
@@ -226,13 +229,20 @@ export class NeonRelay {
       return;
     }
     const key = `${sessionId}:${previousClientId}`;
+    const newReconnect = !this.pendingReconnects.has(key);
+    if (newReconnect && this.pendingReconnects.size >= this.config.maxPendingConnections) {
+      this._sendDeny(source, "Relay busy");
+      return;
+    }
     this.pendingReconnects.set(key, {
       sessionId,
       clientId: previousClientId,
       newAddress: source,
       requestedAt: Date.now(),
     });
-    this.socket.sendPacket(makePacket(PacketType.RECONNECT_REQUEST, 0, previousClientId, 1, payload), host);
+    if (newReconnect) {
+      this.socket.sendPacket(makePacket(PacketType.RECONNECT_REQUEST, 0, previousClientId, 1, payload), host);
+    }
   }
 
   private _handleDisconnectNotice(source: Address, header: NeonPacket["header"]): void {
@@ -293,8 +303,11 @@ export class NeonRelay {
       if (rc.requestedAt < cutoff) this.pendingReconnects.delete(key);
     }
 
-    if (this.rateLimiters.size > this.config.maxRateLimiters) {
-      this.rateLimiters.clear();
+    const now = Date.now();
+    for (const [k, v] of this.rateLimiters) {
+      if (now - v.lastAccess > this.config.relayClientTimeoutMs) {
+        this.rateLimiters.delete(k);
+      }
     }
   }
 }

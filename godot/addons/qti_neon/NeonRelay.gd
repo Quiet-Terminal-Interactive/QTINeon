@@ -110,9 +110,9 @@ func _handle_raw(data: PackedByteArray, peer_key: String) -> void:
 			_route_opaque(data, hdr, peer_key)
 
 func _check_rate(peer_key: String) -> bool:
-	if _rate_limiters.size() >= _config.max_rate_limiters:
-		_rate_limiters.clear()
 	if not _rate_limiters.has(peer_key):
+		if _rate_limiters.size() >= _config.max_rate_limiters:
+			return false
 		_rate_limiters[peer_key] = _RateMod.new(_config.max_packets_per_second)
 	return _rate_limiters[peer_key].allow()
 
@@ -206,10 +206,15 @@ func _on_reconnect_request(data: PackedByteArray, payload: PackedByteArray, peer
 	var sid: int = p["session_id"]
 	var cid: int = p["previous_client_id"]
 	var rk := "%d:%d" % [sid, cid]
+	var new_reconnect := not _pending_reconnects.has(rk)
+	if new_reconnect and _pending_reconnects.size() >= _config.max_pending_connections:
+		_deny_to(peer_key, "Relay busy")
+		return
 	_pending_reconnects[rk] = {"new_peer_key": peer_key, "timestamp": Time.get_ticks_msec()}
-	var hk := _sessions.host_peer_key(sid)
-	if hk != "":
-		_socket.send(data, hk)
+	if new_reconnect:
+		var hk := _sessions.host_peer_key(sid)
+		if hk != "":
+			_socket.send(data, hk)
 
 func _on_disconnect_notice(data: PackedByteArray, peer_key: String) -> void:
 	if _pending_connections.has(peer_key):
@@ -306,3 +311,10 @@ func _perform_cleanup() -> void:
 			stale_r.append(rk)
 	for rk in stale_r:
 		_pending_reconnects.erase(rk)
+
+	var stale_l: Array = []
+	for pk in _rate_limiters.keys():
+		if now - (_rate_limiters[pk] as _RateMod).last_access() > _config.relay_client_timeout_ms:
+			stale_l.append(pk)
+	for pk in stale_l:
+		_rate_limiters.erase(pk)

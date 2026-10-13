@@ -148,6 +148,10 @@ func (r *NeonRelay) processPackets() {
 		key := source.String()
 		limiter, exists := r.rateLimiters[key]
 		if !exists {
+			if len(r.rateLimiters) >= r.config.MaxRateLimiters {
+				relayLogger.Debug("rate limiter capacity reached; packet discarded", "source", source)
+				continue
+			}
 			limiter = newRateLimiter(r.config.MaxPacketsPerSecond)
 			r.rateLimiters[key] = limiter
 		}
@@ -267,16 +271,24 @@ func (r *NeonRelay) handleReconnectRequest(req ReconnectRequest, source net.UDPA
 		return
 	}
 	key := fmt.Sprintf("%d:%d", req.SessionID, req.PreviousClientID)
+	_, exists := r.pendingReconnects[key]
+	newReconnect := !exists
+	if newReconnect && len(r.pendingReconnects) >= r.config.MaxPendingConnections {
+		r.sendDeny(source, "Relay busy")
+		return
+	}
 	r.pendingReconnects[key] = &pendingReconnect{
 		sessionID:   req.SessionID,
 		clientID:    req.PreviousClientID,
 		newAddress:  source,
 		requestedAt: time.Now(),
 	}
-	_ = r.socket.sendPacket(
-		NewNeonPacket(ReconnectRequestType, 0, req.PreviousClientID, 1, req),
-		host,
-	)
+	if newReconnect {
+		_ = r.socket.sendPacket(
+			NewNeonPacket(ReconnectRequestType, 0, req.PreviousClientID, 1, req),
+			host,
+		)
+	}
 }
 
 func (r *NeonRelay) handleDisconnectNotice(source net.UDPAddr, header PacketHeader) {
@@ -367,7 +379,9 @@ func (r *NeonRelay) performCleanup() {
 		}
 	}
 
-	if len(r.rateLimiters) > r.config.MaxRateLimiters {
-		r.rateLimiters = make(map[string]*rateLimiter)
+	for key, l := range r.rateLimiters {
+		if l.lastAccessTime().Before(cutoff) {
+			delete(r.rateLimiters, key)
+		}
 	}
 }

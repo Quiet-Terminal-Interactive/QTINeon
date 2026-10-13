@@ -121,8 +121,18 @@ public final class NeonRelay extends AbstractLifecycle implements AutoCloseable 
                 logger.fine(() -> "Malformed packet discarded from " + received.source());
                 continue;
             }
-            RateLimiter limiter = rateLimiters.computeIfAbsent(
-                    received.source(), k -> new RateLimiter(config.getMaxPacketsPerSecond()));
+            RateLimiter limiter = rateLimiters.get(received.source());
+
+            if (limiter == null) {
+                if (rateLimiters.size() >= config.getMaxRateLimiters()) {
+                    logger.fine(() -> "Rate limiter capacity reached; packet discarded from " + received.source());
+                    continue;
+                }
+
+                limiter = new RateLimiter(config.getMaxPacketsPerSecond());
+                rateLimiters.put(received.source(), limiter);
+            }
+
             if (!limiter.allowPacket()) {
                 logger.fine(() -> "Rate limited: " + received.source());
                 continue;
@@ -222,9 +232,16 @@ public final class NeonRelay extends AbstractLifecycle implements AutoCloseable 
             return;
         }
         String key = sessionId + ":" + (req.previousClientId() & 0xFF);
+        boolean newReconnect = !pendingReconnects.containsKey(key);
+        if (newReconnect && pendingReconnects.size() >= config.getMaxPendingConnections()) {
+            sendDeny(source, "Relay busy");
+            return;
+        }
         pendingReconnects.put(key, new PendingReconnect(sessionId, req.previousClientId(), source, Instant.now()));
-        socket.send(NeonPacket.create(PacketType.RECONNECT_REQUEST,
-                (short) 0, req.previousClientId(), (byte) 1, req).toBytes(), host);
+        if (newReconnect) {
+            socket.send(NeonPacket.create(PacketType.RECONNECT_REQUEST,
+                    (short) 0, req.previousClientId(), (byte) 1, req).toBytes(), host);
+        }
     }
 
     private void handleDisconnectNotice(SocketAddress source, PacketHeader header) throws IOException {
@@ -289,9 +306,11 @@ public final class NeonRelay extends AbstractLifecycle implements AutoCloseable 
 
         pendingReconnects.entrySet().removeIf(e -> e.getValue().requestedAt().isBefore(cutoff));
 
-        if (rateLimiters.size() > config.getMaxRateLimiters()) {
-            rateLimiters.clear();
-        }
+        long limiterNowMs = System.currentTimeMillis();
+        long limiterExpiryMs = config.getRelayClientTimeoutMs();
+
+        rateLimiters.entrySet().removeIf(
+                entry -> limiterNowMs - entry.getValue().lastAccessMs() > limiterExpiryMs);
     }
 
     /** Returns the local address the relay is bound to. */

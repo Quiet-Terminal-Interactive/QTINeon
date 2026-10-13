@@ -8,6 +8,7 @@
 var _max_tokens: float
 var _tokens: float
 var _last_check: int
+var _last_access: int
 var _violations: int = 0
 var _throttled: bool = false
 
@@ -18,6 +19,7 @@ func _init(max_packets_per_second: int) -> void:
 	_max_tokens = float(max_packets_per_second)
 	_tokens = _max_tokens
 	_last_check = Time.get_ticks_msec()
+	_last_access = _last_check
 
 
 ## Returns [code]true[/code] if this packet is within the allowed rate.
@@ -25,6 +27,7 @@ func _init(max_packets_per_second: int) -> void:
 ## Refills the token bucket when a full second has elapsed since the last check.
 func allow() -> bool:
 	var now := Time.get_ticks_msec()
+	_last_access = now
 	if now - _last_check >= 1000:
 		_last_check = now
 		_tokens = _max_tokens
@@ -43,3 +46,7 @@ func allow() -> bool:
 ## Returns [code]true[/code] if this peer has sustained more than 10 seconds of violations.
 func is_throttled() -> bool:
 	return _throttled
+
+## Returns the [method Time.get_ticks_msec] timestamp of the most recent [method allow] call.
+func last_access() -> int:
+	return _last_access
