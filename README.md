@@ -367,6 +367,77 @@ ok := client.Reconnect(5) // uses stored session token, up to 5 attempts
 
 </details>
 
+## Custom Relay Packet Handling
+
+The relay needs no extra code by default. To add custom behaviour, hook in before the default handling: the hook sees every packet that passes rate limiting and returns `true` to consume it (skipping default handling) or `false` to let the relay handle it as usual. Use the relay's `send` method to reply.
+
+<details>
+<summary>Java</summary>
+
+```java
+NeonRelay relay = new NeonRelay("0.0.0.0", cfg) {
+    @Override
+    protected boolean onPacket(NeonPacket packet, SocketAddress source) throws IOException {
+        return packet.header().packetType() == 0x42; // drop this type
+    }
+};
+```
+
+</details>
+
+<details>
+<summary>Python</summary>
+
+```python
+class MyRelay(NeonRelay):
+    def on_packet(self, packet, source):
+        return packet.header.packet_type == 0x42  # drop this type
+
+relay = MyRelay("0.0.0.0", NeonConfig())
+```
+
+</details>
+
+<details>
+<summary>TypeScript</summary>
+
+```typescript
+class MyRelay extends NeonRelay {
+  protected override onPacket(packet: NeonPacket, source: Address): boolean {
+    return packet.header.packetType === 0x42; // drop this type
+  }
+}
+
+const relay = new MyRelay('0.0.0.0');
+```
+
+</details>
+
+<details>
+<summary>Godot</summary>
+
+```gdscript
+# my_relay.gd
+extends NeonRelay
+
+func _on_packet(hdr: Dictionary, data: PackedByteArray, peer_key: String) -> bool:
+    return hdr["type"] == 0x42  # drop this type
+```
+
+</details>
+
+<details>
+<summary>Go</summary>
+
+```go
+relay, _ := qtineon.NewRelay("0.0.0.0", cfg)
+relay.SetPacketHandler(func(packet qtineon.NeonPacket, source net.UDPAddr) bool {
+	return packet.Header.PacketType == 0x42 // drop this type
+})
+```
+
+</details>
+
 ## DTLS Encryption
 
 DTLS is opt-in — the relay, host, and client handle the handshake automatically before any Neon packets are exchanged.
@@ -475,7 +546,7 @@ When DTLS is not configured (the default), packets are sent in plaintext.
 <dependency>
     <groupId>com.quietterminal</groupId>
     <artifactId>qti-neon</artifactId>
-    <version>1.0.0</version>
+    <version>1.2.0</version>
 </dependency>
 ```
 

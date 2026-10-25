@@ -43,6 +43,8 @@ All UDP traffic flows through the relay. Clients and the host never communicate 
 
 The relay is stateless with respect to game logic. It parses the packet header plus the payloads of lifecycle packets. `HOST_REGISTER`, `CONNECT_REQUEST`, `CONNECT_ACCEPT`, `RECONNECT_REQUEST`, and `DISCONNECT_NOTICE` have relay-specific handlers; all other valid packets are routed opaquely by destination ID.
 
+Applications can extend the relay with a packet hook (`onPacket` / `on_packet` / `_on_packet` in subclasses, `SetPacketHandler` in Go) that runs after rate limiting and before the default handlers. Returning `true` consumes the packet; the default hook returns `false`, so an unextended relay behaves exactly as described above.
+
 ### Host
 
 - Registers a session with the relay

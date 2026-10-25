@@ -67,6 +67,15 @@ class NeonRelay:
     # … later …
     relay.stop()
     ```
+
+    Subclasses can intercept packets by overriding `on_packet` and reply
+    with `send`:
+
+    ```python
+    class MyRelay(NeonRelay):
+        def on_packet(self, packet, source):
+            return False  # fall through to default handling
+    ```
     """
 
     def __init__(self, bind_address: str, config: NeonConfig | None = None) -> None:
@@ -172,6 +181,29 @@ class NeonRelay:
             self.stop()
 
     # ------------------------------------------------------------------ #
+    # Extension hooks                                                      #
+    # ------------------------------------------------------------------ #
+
+    def on_packet(self, packet: NeonPacket, source: tuple[str, int]) -> bool:
+        """Called for every packet that passes rate limiting, before default handling.
+
+        Override in a subclass to add custom handling. The default
+        implementation does nothing.
+
+        Args:
+            packet: The received packet.
+            source: The ``(host, port)`` the packet came from.
+
+        Returns:
+            ``True`` to consume the packet and skip default handling.
+        """
+        return False
+
+    def send(self, packet: NeonPacket, dest: tuple[str, int]) -> None:
+        """Send *packet* to *dest*, encrypting via DTLS if a session exists."""
+        self._socket.send_packet(packet, dest)
+
+    # ------------------------------------------------------------------ #
     # Packet processing                                                    #
     # ------------------------------------------------------------------ #
 
@@ -197,6 +229,8 @@ class NeonRelay:
             self._handle_packet(packet, source)
 
     def _handle_packet(self, packet: NeonPacket, source: tuple[str, int]) -> None:
+        if self.on_packet(packet, source):
+            return
         payload = packet.payload
         match payload:
             case _HostRegister():

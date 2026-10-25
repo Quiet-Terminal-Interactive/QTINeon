@@ -5,6 +5,9 @@
 ##
 ## Call [method start_and_run] on a dedicated thread, or call [method start] and then
 ## drive the relay manually by calling [method process] in a loop.
+##
+## Extend this class and override [method _on_packet] to add custom packet handling,
+## replying with [method send].
 class_name NeonRelay
 extends RefCounted
 
@@ -85,6 +88,18 @@ func process() -> void:
 		_handle_raw(pkt["data"] as PackedByteArray, pkt["peer_key"] as String)
 	_perform_cleanup()
 
+## Virtual. Called for every packet that passes rate limiting, before default handling. The default implementation does nothing.
+## [param hdr] The parsed header ([code]type[/code], [code]destination[/code], ...).
+## [param data] The full raw packet; use [code]_Proto.payload_of(data)[/code] for the payload.
+## [param peer_key] The sender's peer key.
+## Return [code]true[/code] to consume the packet and skip default handling.
+func _on_packet(_hdr: Dictionary, _data: PackedByteArray, _peer_key: String) -> bool:
+	return false
+
+## Sends a raw packet to [param peer_key], encrypting via DTLS if a session exists.
+func send(data: PackedByteArray, peer_key: String) -> void:
+	_socket.send(data, peer_key)
+
 func _handle_raw(data: PackedByteArray, peer_key: String) -> void:
 	if not _check_rate(peer_key):
 		return
@@ -92,6 +107,8 @@ func _handle_raw(data: PackedByteArray, peer_key: String) -> void:
 	if hdr.is_empty():
 		return
 	_sessions.touch_peer(peer_key)
+	if _on_packet(hdr, data, peer_key):
+		return
 	var payload := _Proto.payload_of(data)
 	match hdr["type"]:
 		_Proto.PT_HOST_REGISTER:

@@ -37,8 +37,22 @@ import java.util.logging.Logger;
  * NeonRelay relay = new NeonRelay("0.0.0.0", NeonConfig.defaults());
  * Thread.ofVirtual().start(relay::startAndRun);
  * }</pre>
+ *
+ * <p>
+ * Subclasses can intercept packets by overriding
+ * {@link #onPacket(NeonPacket, SocketAddress)} and reply with
+ * {@link #send(NeonPacket, SocketAddress)}:
+ *
+ * <pre>{@code
+ * NeonRelay relay = new NeonRelay("0.0.0.0", NeonConfig.defaults()) {
+ *     @Override
+ *     protected boolean onPacket(NeonPacket packet, SocketAddress source) throws IOException {
+ *         return false; // fall through to default handling
+ *     }
+ * };
+ * }</pre>
  */
-public final class NeonRelay extends AbstractLifecycle implements AutoCloseable {
+public class NeonRelay extends AbstractLifecycle implements AutoCloseable {
 
     private static final Logger logger = Logger.getLogger(NeonRelay.class.getName());
 
@@ -141,7 +155,34 @@ public final class NeonRelay extends AbstractLifecycle implements AutoCloseable 
         }
     }
 
+    /**
+     * Called for every packet that passes rate limiting, before the relay's
+     * default handling. The default implementation does nothing.
+     *
+     * @param packet the received packet
+     * @param source the address the packet came from
+     * @return {@code true} to consume the packet and skip default handling
+     * @throws IOException if sending a reply fails
+     */
+    protected boolean onPacket(NeonPacket packet, SocketAddress source) throws IOException {
+        return false;
+    }
+
+    /**
+     * Sends a packet to the given address, encrypting via DTLS if a session
+     * exists.
+     *
+     * @param packet the packet to send
+     * @param dest   destination address
+     * @throws IOException if the send fails
+     */
+    protected void send(NeonPacket packet, SocketAddress dest) throws IOException {
+        socket.sendPacket(packet, dest);
+    }
+
     private void handlePacket(NeonPacket packet, SocketAddress source) throws IOException {
+        if (onPacket(packet, source))
+            return;
         switch (packet.payload()) {
             case PacketPayload.HostRegister req -> handleHostRegister(req, source);
             case PacketPayload.ConnectRequest req -> handleConnectRequest(req, source, packet.header());

@@ -122,6 +122,8 @@ See PROTOCOL.md, ARCHITECTURE.md and CONFIGURATION.md in the repository root for
   - [func NewRelay\(bindAddress string, config \*NeonConfig\) \(\*NeonRelay, error\)](<#NewRelay>)
   - [func \(r \*NeonRelay\) IsRunning\(\) bool](<#NeonRelay.IsRunning>)
   - [func \(r \*NeonRelay\) LocalAddress\(\) \*net.UDPAddr](<#NeonRelay.LocalAddress>)
+  - [func \(r \*NeonRelay\) Send\(packet NeonPacket, dest net.UDPAddr\) error](<#NeonRelay.Send>)
+  - [func \(r \*NeonRelay\) SetPacketHandler\(handler func\(packet NeonPacket, source net.UDPAddr\) bool\)](<#NeonRelay.SetPacketHandler>)
   - [func \(r \*NeonRelay\) Start\(\) error](<#NeonRelay.Start>)
   - [func \(r \*NeonRelay\) StartAndRun\(\) error](<#NeonRelay.StartAndRun>)
   - [func \(r \*NeonRelay\) Stop\(\) error](<#NeonRelay.Stop>)
@@ -979,7 +981,7 @@ func (p NeonPacket) ToBytes() ([]byte, error)
 ToBytes serialises the complete packet to bytes.
 
 <a name="NeonRelay"></a>
-## type [NeonRelay](<https://github.com/quiet-terminal-interactive/qtineon/blob/main/go/relay.go#L44-L58>)
+## type [NeonRelay](<https://github.com/quiet-terminal-interactive/qtineon/blob/main/go/relay.go#L46-L62>)
 
 NeonRelay is a UDP relay server for the Neon multiplayer protocol.
 
@@ -992,6 +994,8 @@ go relay.StartAndRun()
 relay.Stop()
 ```
 
+Custom packet handling can be added with SetPacketHandler, replying via Send.
+
 ```go
 type NeonRelay struct {
     // contains filtered or unexported fields
@@ -999,7 +1003,7 @@ type NeonRelay struct {
 ```
 
 <a name="NewRelay"></a>
-### func [NewRelay](<https://github.com/quiet-terminal-interactive/qtineon/blob/main/go/relay.go#L61>)
+### func [NewRelay](<https://github.com/quiet-terminal-interactive/qtineon/blob/main/go/relay.go#L65>)
 
 ```go
 func NewRelay(bindAddress string, config *NeonConfig) (*NeonRelay, error)
@@ -1008,7 +1012,7 @@ func NewRelay(bindAddress string, config *NeonConfig) (*NeonRelay, error)
 NewRelay creates a relay bound to bindAddress on config.RelayPort.
 
 <a name="NeonRelay.IsRunning"></a>
-### func \(\*NeonRelay\) [IsRunning](<https://github.com/quiet-terminal-interactive/qtineon/blob/main/go/relay.go#L131>)
+### func \(\*NeonRelay\) [IsRunning](<https://github.com/quiet-terminal-interactive/qtineon/blob/main/go/relay.go#L147>)
 
 ```go
 func (r *NeonRelay) IsRunning() bool
@@ -1017,7 +1021,7 @@ func (r *NeonRelay) IsRunning() bool
 IsRunning reports whether the relay processing loop is active.
 
 <a name="NeonRelay.LocalAddress"></a>
-### func \(\*NeonRelay\) [LocalAddress](<https://github.com/quiet-terminal-interactive/qtineon/blob/main/go/relay.go#L136>)
+### func \(\*NeonRelay\) [LocalAddress](<https://github.com/quiet-terminal-interactive/qtineon/blob/main/go/relay.go#L152>)
 
 ```go
 func (r *NeonRelay) LocalAddress() *net.UDPAddr
@@ -1025,8 +1029,26 @@ func (r *NeonRelay) LocalAddress() *net.UDPAddr
 
 LocalAddress returns the local address the relay is bound to.
 
+<a name="NeonRelay.Send"></a>
+### func \(\*NeonRelay\) [Send](<https://github.com/quiet-terminal-interactive/qtineon/blob/main/go/relay.go#L98>)
+
+```go
+func (r *NeonRelay) Send(packet NeonPacket, dest net.UDPAddr) error
+```
+
+Send sends a packet to dest, encrypting via DTLS if a session exists.
+
+<a name="NeonRelay.SetPacketHandler"></a>
+### func \(\*NeonRelay\) [SetPacketHandler](<https://github.com/quiet-terminal-interactive/qtineon/blob/main/go/relay.go#L93>)
+
+```go
+func (r *NeonRelay) SetPacketHandler(handler func(packet NeonPacket, source net.UDPAddr) bool)
+```
+
+SetPacketHandler sets a handler called for every packet that passes rate limiting, before default handling. Return true from the handler to consume the packet and skip default handling. Pass nil to remove the handler.
+
 <a name="NeonRelay.Start"></a>
-### func \(\*NeonRelay\) [Start](<https://github.com/quiet-terminal-interactive/qtineon/blob/main/go/relay.go#L89>)
+### func \(\*NeonRelay\) [Start](<https://github.com/quiet-terminal-interactive/qtineon/blob/main/go/relay.go#L105>)
 
 ```go
 func (r *NeonRelay) Start() error
@@ -1037,7 +1059,7 @@ Start initialises the relay without entering the processing loop.
 Call StartAndRun instead for typical use.
 
 <a name="NeonRelay.StartAndRun"></a>
-### func \(\*NeonRelay\) [StartAndRun](<https://github.com/quiet-terminal-interactive/qtineon/blob/main/go/relay.go#L113>)
+### func \(\*NeonRelay\) [StartAndRun](<https://github.com/quiet-terminal-interactive/qtineon/blob/main/go/relay.go#L129>)
 
 ```go
 func (r *NeonRelay) StartAndRun() error
@@ -1050,7 +1072,7 @@ go relay.StartAndRun()
 ```
 
 <a name="NeonRelay.Stop"></a>
-### func \(\*NeonRelay\) [Stop](<https://github.com/quiet-terminal-interactive/qtineon/blob/main/go/relay.go#L102>)
+### func \(\*NeonRelay\) [Stop](<https://github.com/quiet-terminal-interactive/qtineon/blob/main/go/relay.go#L118>)
 
 ```go
 func (r *NeonRelay) Stop() error

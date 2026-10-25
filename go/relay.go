@@ -41,6 +41,8 @@ type pendingReconnect struct {
 //	go relay.StartAndRun()
 //	// … later …
 //	relay.Stop()
+//
+// Custom packet handling can be added with SetPacketHandler, replying via Send.
 type NeonRelay struct {
 	config *NeonConfig
 	socket *neonSocket
@@ -53,6 +55,8 @@ type NeonRelay struct {
 	pendingBySession   map[int32][]net.UDPAddr
 	pendingReconnects  map[string]*pendingReconnect
 	lastCleanup        time.Time
+
+	packetHandler func(packet NeonPacket, source net.UDPAddr) bool
 
 	state relayState
 }
@@ -81,6 +85,18 @@ func NewRelay(bindAddress string, config *NeonConfig) (*NeonRelay, error) {
 		lastCleanup:        time.Now(),
 		state:              relayCreated,
 	}, nil
+}
+
+// SetPacketHandler sets a handler called for every packet that passes rate limiting, before default handling.
+// Return true from the handler to consume the packet and skip default handling.
+// Pass nil to remove the handler.
+func (r *NeonRelay) SetPacketHandler(handler func(packet NeonPacket, source net.UDPAddr) bool) {
+	r.packetHandler = handler
+}
+
+// Send sends a packet to dest, encrypting via DTLS if a session exists.
+func (r *NeonRelay) Send(packet NeonPacket, dest net.UDPAddr) error {
+	return r.socket.sendPacket(packet, dest)
 }
 
 // Start initialises the relay without entering the processing loop.
@@ -165,6 +181,9 @@ func (r *NeonRelay) processPackets() {
 }
 
 func (r *NeonRelay) handlePacket(packet NeonPacket, source net.UDPAddr) {
+	if r.packetHandler != nil && r.packetHandler(packet, source) {
+		return
+	}
 	switch payload := packet.Payload.(type) {
 	case HostRegister:
 		r.handleHostRegister(payload, source)

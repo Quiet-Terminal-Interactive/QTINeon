@@ -54,7 +54,7 @@ export class NeonRelay {
       ? [bindAddress.slice(0, bindAddress.lastIndexOf(":")), bindAddress.slice(bindAddress.lastIndexOf(":") + 1)]
       : [bindAddress, String(this.config.relayPort)];
     this.socket = new NeonSocket({ address: host, port: parseInt(portStr, 10) }, this.config);
-    this.socket.on("packet", (pkt: NeonPacket, addr: Address) => this._onPacket(pkt, addr));
+    this.socket.on("packet", (pkt: NeonPacket, addr: Address) => this._onReceive(pkt, addr));
   }
 
   async start(): Promise<void> {
@@ -90,7 +90,22 @@ export class NeonRelay {
     return this.socket.localAddress();
   }
 
-  private _onPacket(pkt: NeonPacket, source: Address): void {
+  /**
+   * Called for every packet that passes rate limiting, before default handling.
+   * The default implementation does nothing.
+   *
+   * @returns `true` to consume the packet and skip default handling.
+   */
+  protected onPacket(_packet: NeonPacket, _source: Address): boolean {
+    return false;
+  }
+
+  /** Sends a packet to `dest`, encrypting via DTLS if a session exists. */
+  protected send(packet: NeonPacket, dest: Address): void {
+    this.socket.sendPacket(packet, dest);
+  }
+
+  private _onReceive(pkt: NeonPacket, source: Address): void {
     if (this.state !== State.RUNNING) return;
 
     this.sessionManager.updateLastSeen(source);
@@ -110,6 +125,7 @@ export class NeonRelay {
   }
 
   private _handlePacket(pkt: NeonPacket, source: Address): void {
+    if (this.onPacket(pkt, source)) return;
     const p = pkt.payload;
     if (isHostRegister(p)) {
       this._handleHostRegister(p.sessionId, p.hostToken, source);

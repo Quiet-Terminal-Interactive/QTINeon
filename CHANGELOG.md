@@ -4,6 +4,17 @@ All notable changes to QTI Neon are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.2.0] — 2026-10-25
+
+### Added
+- `NeonRelay` packet hook for custom relay handling, called for every packet that passes rate limiting before default handling; return `true` to consume the packet. The default hook does nothing, so existing relays are unaffected.
+  - Java: override `protected boolean onPacket(NeonPacket, SocketAddress)` (`NeonRelay` is no longer `final`)
+  - Python: override `on_packet(packet, source)`
+  - TypeScript: override `protected onPacket(packet, source)`
+  - Godot: override `_on_packet(hdr, data, peer_key)` in a script that `extends NeonRelay`
+  - Go: `NeonRelay.SetPacketHandler(func(NeonPacket, net.UDPAddr) bool)`
+- `NeonRelay` send helper for replying from the hook: `send` (Java, Python, TypeScript, Godot) and `Send` (Go)
+
 ## [1.0.0] — 2026-05-26
 
 ### Added
